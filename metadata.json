@@ -1,0 +1,5 @@
+{
+  "name": "MANTRA Voxel Explorer",
+  "description": "A real-time 3D voxel-based block explorer for MANTRA Chain. Visualize blocks and transactions as interactive cubes in a navigable space.",
+  "requestFramePermissions": []
+}
