@@ -1,4 +1,3 @@
-
 export interface Transaction {
   hash: string;
   height: string;
@@ -14,6 +13,7 @@ export interface BlockData {
   proposer: string;
   txs: Transaction[];
   txCount: number;
+  justArrived?: boolean;
 }
 
 export interface BlockResponse {
@@ -50,6 +50,6 @@ export interface TxSearchResponse {
 }
 
 export enum CameraMode {
-  LIVE = 'LIVE',
-  FREE = 'FREE',
+  LIVE = "LIVE",
+  FREE = "FREE",
 }

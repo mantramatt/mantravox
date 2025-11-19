@@ -1,6 +1,12 @@
-import React, { useMemo, useRef, useState, useLayoutEffect } from "react";
+import React, {
+  useMemo,
+  useRef,
+  useState,
+  useLayoutEffect,
+  useEffect,
+} from "react";
 import * as THREE from "three";
-import { Text, Edges, Line } from "@react-three/drei";
+import { Text, Edges } from "@react-three/drei";
 import { BlockData } from "../types";
 import { useChainStore } from "../store/useChainStore";
 import { useFrame } from "@react-three/fiber";
@@ -8,10 +14,17 @@ import { useFrame } from "@react-three/fiber";
 interface VoxelBlockProps {
   block: BlockData;
   position: [number, number, number];
-  prevBlockPosition?: [number, number, number];
 }
 
 const BLOCK_SIZE = 8;
+const BLOCK_ENTRANCE_DURATION = 0.9;
+const BLOCK_ENTRANCE_MIN_SCALE = 0.4;
+const FLY_IN_SWEEP_X = 22;
+const FLY_IN_SWEEP_Z = 14;
+const FLY_IN_LIFT = 7;
+const FLY_IN_ARC = 4;
+
+const animatedHeights = new Set<number>();
 
 // Helper to strictly disable raycasting on visual objects
 const ignoreRaycast = (obj: any) => {
@@ -46,7 +59,7 @@ const seededRandom = (seed: number, offset: number) => {
 };
 
 // Generate a consistent color palette (Hex strings)
-const getColorFromHash = (str: string) => {
+export const getColorFromHash = (str: string) => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
@@ -67,11 +80,7 @@ const getColorFromHash = (str: string) => {
   return { main, glow, dim };
 };
 
-const VoxelBlock: React.FC<VoxelBlockProps> = ({
-  block,
-  position,
-  prevBlockPosition,
-}) => {
+const VoxelBlock: React.FC<VoxelBlockProps> = ({ block, position }) => {
   const selectObject = useChainStore((state) => state.selectObject);
   const contentRef = useRef<THREE.Group>(null);
   const visualMeshRef = useRef<THREE.InstancedMesh>(null);
@@ -189,12 +198,70 @@ const VoxelBlock: React.FC<VoxelBlockProps> = ({
     hitboxMeshRef.current.instanceMatrix.needsUpdate = true;
   }, [txVoxels, tempVisual, tempHitbox]);
 
+  const spawnState = useRef({
+    active: false,
+    startTime: 0,
+    progress: 1,
+  });
+  const spawnOffset = useMemo(() => new THREE.Vector3(), []);
+
+  const computeFlyInOffset = (progress: number) => {
+    const t = 1 - progress;
+    const arc = Math.sin(t * Math.PI) * FLY_IN_ARC;
+    spawnOffset.set(
+      t * FLY_IN_SWEEP_X,
+      t * FLY_IN_LIFT + arc,
+      t * FLY_IN_SWEEP_Z
+    );
+    return spawnOffset;
+  };
+
+  useEffect(() => {
+    const shouldAnimate =
+      !!block.justArrived && !animatedHeights.has(block.height);
+    if (shouldAnimate) {
+      spawnState.current = {
+        active: true,
+        startTime: 0,
+        progress: 0,
+      };
+      animatedHeights.add(block.height);
+    }
+  }, [block.height, block.justArrived]);
+
   useFrame((state) => {
+    if (spawnState.current.active) {
+      if (spawnState.current.startTime === 0) {
+        spawnState.current.startTime = state.clock.elapsedTime;
+      }
+      const elapsed = state.clock.elapsedTime - spawnState.current.startTime;
+      const normalized = Math.min(elapsed / BLOCK_ENTRANCE_DURATION, 1);
+      const eased = 1 - Math.pow(1 - normalized, 3);
+      spawnState.current.progress = eased;
+      if (normalized >= 1) {
+        spawnState.current.active = false;
+      }
+    }
+
     if (contentRef.current) {
-      // Idle floating animation for the outer block
-      contentRef.current.position.y =
+      const bob =
         Math.sin(state.clock.elapsedTime * 0.5 + position[0] * 0.1) * 0.2;
-      const targetScale = hovered ? 1.05 : 1;
+      const spawnProgress = spawnState.current.progress;
+      const offset = computeFlyInOffset(spawnProgress);
+
+      const entranceScale = THREE.MathUtils.lerp(
+        BLOCK_ENTRANCE_MIN_SCALE,
+        1,
+        spawnProgress
+      );
+      const targetScale = (hovered ? 1.05 : 1) * entranceScale;
+      contentRef.current.position.set(offset.x, offset.y + bob, offset.z);
+      const bankAmount = 1 - spawnProgress;
+      contentRef.current.rotation.set(
+        THREE.MathUtils.degToRad(8 * bankAmount),
+        THREE.MathUtils.degToRad(-25 * bankAmount),
+        THREE.MathUtils.degToRad(6 * bankAmount)
+      );
       vec3.set(targetScale, targetScale, targetScale);
       contentRef.current.scale.lerp(vec3, 0.1);
     }
@@ -244,21 +311,6 @@ const VoxelBlock: React.FC<VoxelBlockProps> = ({
 
   return (
     <group position={position}>
-      {/* Connection Wire - Visual Only */}
-      {prevBlockPosition && (
-        <Line
-          points={[
-            [-(position[0] - prevBlockPosition[0]) + BLOCK_SIZE / 2, 0, 0],
-            [-BLOCK_SIZE / 2, 0, 0],
-          ]}
-          color={threeColors.main}
-          lineWidth={2}
-          transparent
-          opacity={0.4}
-          onUpdate={ignoreRaycast}
-        />
-      )}
-
       {/* Text Labels - Visual Only */}
       <group position={[0, BLOCK_SIZE / 2 + 1.5, 0]}>
         <Text
